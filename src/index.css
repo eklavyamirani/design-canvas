@@ -1,0 +1,12 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* Stops the page itself from scrolling or bouncing under the canvas. */
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
