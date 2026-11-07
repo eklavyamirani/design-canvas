@@ -35,6 +35,13 @@ function apiUrl(path: string): string {
   return new URL(`collab/${path}`, new URL(import.meta.env.BASE_URL, location.origin)).href;
 }
 
+// Fractional indices sort as plain strings; elements without one go last.
+function indexOrder(a: unknown, b: unknown): number {
+  if (typeof a !== 'string') return typeof b === 'string' ? 1 : 0;
+  if (typeof b !== 'string') return -1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export async function createRoom(): Promise<string> {
   const response = await fetch(apiUrl('rooms'), { method: 'POST', redirect: 'manual' });
   if (!response.ok) throw new Error(`could not create a room (${response.status || 'signed out'})`);
@@ -181,7 +188,12 @@ export class Collab {
 
   private applyRemote(remote: SyncedElement[]): void {
     const local = this.api.getSceneElementsIncludingDeleted();
-    const restored = restoreElements(remote as never, local) as unknown as RemoteExcalidrawElement[];
+    // restoreElements repairs what another editor version might send. Not
+    // given the local scene: it would bump a stale remote element above the
+    // local version and let it win. Sorted by fractional index, as it
+    // re-indexes (and so re-versions) elements it finds out of order.
+    const sorted = [...remote].sort((a, b) => indexOrder(a.index, b.index));
+    const restored = restoreElements(sorted as never, null) as unknown as RemoteExcalidrawElement[];
     // Only elements that survived restore count: one this editor can't load
     // must not later look deleted to it.
     for (const element of restored) {
