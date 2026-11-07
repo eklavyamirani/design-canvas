@@ -5,6 +5,8 @@ import { wins } from './merge.ts';
 // Where rooms live between sessions. Postgres in the platform (DATABASE_URL);
 // memory for local development and tests.
 export interface Store {
+  // Where rooms are kept, for the startup log; throws if unreachable.
+  describe(): Promise<string>;
   createRoom(id: string, createdBy: string): Promise<void>;
   roomExists(id: string): Promise<boolean>;
   loadElements(roomId: string): Promise<SyncedElement[]>;
@@ -18,6 +20,10 @@ export interface Store {
 
 export class MemoryStore implements Store {
   private rooms = new Map<string, { elements: Map<string, SyncedElement>; files: Map<string, SyncedFile> }>();
+
+  async describe(): Promise<string> {
+    return 'memory';
+  }
 
   async createRoom(id: string): Promise<void> {
     if (!this.rooms.has(id)) this.rooms.set(id, { elements: new Map(), files: new Map() });
@@ -59,7 +65,16 @@ export class PgStore implements Store {
   private pool: pg.Pool;
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 5 });
+    // Idle connections stay open: no reconnect on the next edit, and the
+    // platform's verify sees which role the app connects as.
+    this.pool = new pg.Pool({ connectionString, max: 5, idleTimeoutMillis: 0 });
+  }
+
+  async describe(): Promise<string> {
+    const { rows } = await this.pool.query<{ db: string; role: string }>(
+      'select current_database() as db, current_user as role',
+    );
+    return `postgres database ${rows[0].db} as ${rows[0].role}`;
   }
 
   async createRoom(id: string, createdBy: string): Promise<void> {

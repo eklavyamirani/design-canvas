@@ -74,6 +74,7 @@ async function main(): Promise<void> {
     console.warn('DATABASE_URL is unset: rooms are kept in memory and lost on restart');
     store = new MemoryStore();
   }
+  console.log(`rooms are kept in ${await store.describe()}`);
   if (!ORIGIN) console.warn('ALLOWED_ORIGIN is unset: requests are accepted from any origin');
   const rooms = new Rooms(store);
 
