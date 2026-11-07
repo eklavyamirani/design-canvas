@@ -10,6 +10,8 @@
     "fonts": "node scripts/copy-fonts.mjs",
     "predev": "npm run fonts",
     "dev": "vite",
+    "predev:collab": "npm run fonts",
+    "dev:collab": "VITE_COLLAB=on vite",
     "check": "tsc --noEmit",
     "prebuild": "npm run fonts",
     "build": "vite build",

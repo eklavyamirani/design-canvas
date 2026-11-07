@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    // Node runs the .ts files directly (type stripping), so only syntax it
+    // can erase is allowed, and imports name the .ts file.
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "types": ["node"]
+  },
+  "include": ["src", "test", "../shared"]
+}

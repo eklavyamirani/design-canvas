@@ -14,6 +14,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The collab server (server/): type-check and tests, against Postgres as a
+  # runtime role that may only read and write, as on the platform.
+  server:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: server
+    env:
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: |
+          psql -h localhost -U postgres -c "create role canvas login password 'owner'"
+          psql -h localhost -U postgres -c "create database canvas owner canvas"
+          psql -h localhost -U postgres -c "create role canvas_rt login password 'rt' noinherit nobypassrls"
+          psql -h localhost -U postgres -d canvas -c "revoke create on schema public from public"
+      - run: npm run migrate
+        env:
+          DATABASE_URL: postgres://canvas:owner@localhost:5432/canvas
+          DATABASE_RUNTIME_ROLE: canvas_rt
+      - run: npm test
+        env:
+          TEST_DATABASE_URL: postgres://canvas_rt:rt@localhost:5432/canvas
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -31,6 +69,9 @@ jobs:
         env:
           # The project page lives under /<repo>.
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          # The platform build with shared rooms (e.g. https://canvas.app.ekkylab.uk/).
+          # Unset: no "Collaborate" button.
+          VITE_COLLAB_URL: ${{ vars.CANVAS_URL }}
       - if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
         with:
@@ -38,7 +79,7 @@ jobs:
 
   deploy:
     if: github.event_name != 'pull_request'
-    needs: build
+    needs: [build, server]
     runs-on: ubuntu-latest
     permissions:
       pages: write
