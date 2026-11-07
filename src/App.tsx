@@ -151,11 +151,7 @@ function SoloEditor({ share }: { share: ((scene: SavedScene) => Promise<void>) |
       onChange={onChange}
       renderTopRightUI={() =>
         canCollaborate ? (
-          <LiveCollaborationTrigger
-            isCollaborating={false}
-            onSelect={onCollaborate}
-            title={COLLAB_URL ? 'Sign in and draw together' : 'Share this drawing as a room'}
-          />
+          <LiveCollaborationTrigger isCollaborating={false} onSelect={onCollaborate} />
         ) : null
       }
     >
@@ -221,7 +217,7 @@ function RoomEditor({ roomId, seed }: { roomId: string; seed: SavedScene | null 
               {text}
             </span>
           )}
-          <LiveCollaborationTrigger isCollaborating onSelect={copyLink} title="Copy the link to this room" />
+          <LiveCollaborationTrigger isCollaborating onSelect={copyLink} />
         </div>
       )}
     >
