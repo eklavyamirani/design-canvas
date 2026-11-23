@@ -13,6 +13,7 @@
     "predev:collab": "npm run fonts",
     "dev:collab": "VITE_COLLAB=on vite",
     "check": "tsc --noEmit",
+    "test": "node --test 'src/**/*.test.ts'",
     "prebuild": "npm run fonts",
     "build": "vite build",
     "preview": "vite preview"

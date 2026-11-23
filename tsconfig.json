@@ -9,6 +9,9 @@
     "noEmit": true,
     "isolatedModules": true,
     "skipLibCheck": true,
+    // Tests run under Node (type stripping), which needs imports to name the
+    // .ts file; Vite accepts either form.
+    "allowImportingTsExtensions": true,
     "types": ["vite/client", "node"]
   },
   "include": ["src", "vite.config.ts"]
