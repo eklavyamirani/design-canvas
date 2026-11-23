@@ -16,8 +16,8 @@ import {
   type ServerMessage,
   type SyncedElement,
   type SyncedFile,
-  wins,
 } from '../../shared/protocol';
+import { SyncedRecord } from './synced';
 
 export type Status = 'connecting' | 'online' | 'offline' | 'signed-out' | 'not-found';
 
@@ -57,9 +57,9 @@ export class Collab {
   private stopped = false;
   private retryMs = 1_000;
   private retryTimer: number | undefined;
-  // Newest version of each element the server is known to have, by id: what
-  // we sent, or what it sent us. Only newer local versions are sent.
-  private synced = new Map<string, OrderedExcalidrawElement>();
+  // What the server is known to have; only local edits that win against it
+  // are sent.
+  private synced = new SyncedRecord<OrderedExcalidrawElement>();
   private sendTimer: number | undefined;
   private knownFiles = new Set<string>();
   private requestedFiles = new Set<string>();
@@ -196,9 +196,7 @@ export class Collab {
     const restored = restoreElements(sorted as never, null) as unknown as RemoteExcalidrawElement[];
     // Only elements that survived restore count: one this editor can't load
     // must not later look deleted to it.
-    for (const element of restored) {
-      if (wins(element, this.synced.get(element.id))) this.synced.set(element.id, element);
-    }
+    this.synced.received(restored);
     const elements = reconcileElements(local, restored, this.api.getAppState());
     this.api.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
     this.requestMissingFiles();
@@ -206,31 +204,13 @@ export class Collab {
 
   private sendElements(): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
-    const scene = this.api.getSceneElementsIncludingDeleted();
-    // Not just newer versions: an edit with the same version as the server's
-    // but a lower versionNonce also wins there.
-    const changed: OrderedExcalidrawElement[] = scene.filter((element) =>
-      wins(element, this.synced.get(element.id)),
-    );
-    // Opening a file replaces the scene, so elements can vanish instead of
-    // being marked deleted. Tell the others they are gone.
-    const present = new Set(scene.map((element) => element.id));
-    for (const [id, known] of this.synced) {
-      if (present.has(id) || known.isDeleted) continue;
-      changed.push({
-        ...known,
-        isDeleted: true,
-        version: known.version + 1,
-        versionNonce: Math.floor(Math.random() * 2 ** 31),
-        updated: Date.now(),
-      });
-    }
+    const changed = this.synced.changes(this.api.getSceneElementsIncludingDeleted());
     if (changed.length === 0) return;
     // Batches stay well under the server's frame limit.
     for (let start = 0; start < changed.length; start += 500) {
       const batch = changed.slice(start, start + 500);
       if (!this.send({ type: 'update', elements: batch as unknown as SyncedElement[] })) return;
-      for (const element of batch) this.synced.set(element.id, element);
+      this.synced.sent(batch);
     }
   }
 
