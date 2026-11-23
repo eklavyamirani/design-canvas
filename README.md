@@ -22,6 +22,11 @@ no runtime CDN.
 
 ## How rooms sync
 
+For an interactive walk-through of the registers, the merge rule and the
+messages, with real payloads, see
+<https://github.ekkylab.uk/design-canvas/how-sync-works/>
+(`public/how-sync-works/index.html`, a standalone page in the Pages build).
+
 `src/collab/Collab.ts` (editor) and `server/` (collab server) exchange the
 messages in `shared/protocol.ts` over a WebSocket at `/collab/rooms/<id>/ws`.
 Both sides merge with Excalidraw's own rule (`wins`: the higher `version`,

@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How sync works</title>
+<meta name="description" content="An interactive walk through how design-canvas keeps shared drawings in sync: the registers, the merge rule, and the messages, with real values.">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<style>
+:root{
+  --bg:#faf9f6;--fg:#1d1c1a;--muted:#65625b;--line:#e2dfd7;--card:#fff;--code:#f2f0ea;
+  --accent:#2a62c9;--accent-bg:#e6eefb;--ok:#25703a;--ok-bg:#e3f2e6;--bad:#b0312e;--bad-bg:#fbe8e7;
+  --key:#6d45b8;--key-bg:#efe8fa;--ord:#9a5c00;--ord-bg:#fcf0da;--val:#17716a;--val-bg:#ddf2ef;
+  --ink:#1e1e1e;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#161614;--fg:#ecebe6;--muted:#a3a097;--line:#34332f;--card:#1f1f1c;--code:#2a2925;
+    --accent:#7fa8f2;--accent-bg:#20304d;--ok:#7fcf92;--ok-bg:#1d3324;--bad:#f08d89;--bad-bg:#3d201f;
+    --key:#c3a6f3;--key-bg:#30254a;--ord:#f0bd6b;--ord-bg:#3d2e14;--val:#7fd6cc;--val-bg:#173632;
+    --ink:#e8e6e0;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:28px;line-height:1.2;margin:8px 0 8px;font-weight:650}
+h2{font-size:21px;line-height:1.3;margin:0 0 8px;font-weight:650}
+h3{font-size:15px;margin:16px 0 6px;font-weight:600}
+p{margin:0 0 12px}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:5px}
+pre{font-family:var(--mono);font-size:12.5px;line-height:1.5;background:var(--code);border-radius:10px;padding:12px;overflow-x:auto;margin:0 0 12px}
+pre code{background:none;padding:0;font-size:inherit}
+.lede{color:var(--muted);font-size:17px}
+.toc{display:flex;flex-wrap:wrap;gap:6px;margin:16px 0 8px;padding:0;list-style:none}
+.toc a{display:block;font-size:13px;text-decoration:none;color:var(--fg);border:1px solid var(--line);background:var(--card);border-radius:999px;padding:4px 11px}
+section{padding:28px 0;border-top:1px solid var(--line)}
+section:first-of-type{border-top:0}
+.kicker{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:0 0 4px}
+button{font:inherit;font-size:14px;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 13px;cursor:pointer;min-height:36px}
+button:hover{border-color:var(--muted)}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button[aria-pressed=true]{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
+.seg{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.seg button{font-size:13px;padding:5px 11px;min-height:32px}
+.stage{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:4px 0 10px}
+.col{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px;transition:box-shadow .3s,border-color .3s;min-width:0}
+.col.hi{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.col h4{margin:0 0 6px;font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lane{position:relative;height:40px;border-radius:7px;background:var(--code);overflow:hidden}
+.shape{position:absolute;top:9px;width:30%;height:22px;border:2.5px solid var(--ink);border-radius:6px;transition:left .6s ease,border-color .4s,opacity .4s}
+.shape.del{border-style:dashed;opacity:.3}
+.meta{font-family:var(--mono);font-size:11.5px;margin-top:6px;overflow-wrap:anywhere;line-height:1.35}
+.meta .v{color:var(--ord);font-weight:600}
+.sub{font-size:12px;color:var(--muted);margin-top:2px}
+.tag{display:inline-block;font-size:11px;line-height:1.3;border-radius:6px;padding:2px 6px;margin-top:5px}
+.tag.bad{background:var(--bad-bg);color:var(--bad)}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.info{background:var(--accent-bg);color:var(--accent)}
+.synced{margin-top:8px;padding-top:6px;border-top:1px dashed var(--line)}
+.synced .lbl{font-size:11px;color:var(--muted)}
+.pkt{position:absolute;z-index:3;font-family:var(--mono);font-size:11px;background:var(--accent);color:var(--bg);padding:3px 8px;border-radius:999px;white-space:nowrap;pointer-events:none;transition:transform .8s cubic-bezier(.4,.1,.3,1),opacity .25s}
+.pkt.lose{background:var(--muted)}
+.pkt.gone{opacity:0}
+.say{min-height:5.2em;margin:0 0 10px}
+.ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ctl .count{font-size:13px;color:var(--muted);margin-left:auto}
+.payload{margin-top:12px}
+.payload .lbl{font-size:12px;color:var(--muted);margin:0 0 4px}
+.payload pre{max-height:260px}
+.json .k{background:var(--key-bg);color:var(--key);border-radius:4px}
+.json .o{background:var(--ord-bg);color:var(--ord);border-radius:4px}
+.json .v{background:var(--val-bg);color:var(--val);border-radius:4px}
+.json.focus-k .o,.json.focus-k .v,.json.focus-o .k,.json.focus-o .v,.json.focus-v .k,.json.focus-v .o{background:none;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+.chips button{font-size:13px;padding:4px 10px;min-height:32px}
+.chips .ck{color:var(--key)}.chips .co{color:var(--ord)}.chips .cv{color:var(--val)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.card h3{margin:0 0 4px}
+.card p{font-size:14px;margin:0;color:var(--muted)}
+.play{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 10px}
+.play fieldset{border:1px solid var(--line);border-radius:12px;padding:10px;margin:0;background:var(--card);min-width:0}
+.play legend{font-size:13px;color:var(--muted);padding:0 4px}
+.play label{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px;margin:4px 0}
+.play input{width:5.5em;font:inherit;font-size:15px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--fg)}
+.verdict{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:15px}
+.verdict b{font-weight:600}
+.callout{border-left:3px solid var(--accent);padding:2px 0 2px 12px;margin:12px 0;color:var(--fg)}
+ul.recap{padding-left:20px;margin:0}
+ul.recap li{margin:0 0 8px}
+footer{color:var(--muted);font-size:14px;padding-top:24px;border-top:1px solid var(--line)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (prefers-reduced-motion:reduce){.shape,.pkt,.col{transition:none}}
+@media (max-width:420px){.col{padding:6px}.meta{font-size:10.5px}.col h4{font-size:11px}}
+</style>
+</head>
+<body>
+<main>
+<p class="kicker"><a href="../">design-canvas</a></p>
+<h1>How shared drawings stay in sync</h1>
+<p class="lede">Everyone in a room draws on their own copy of the drawing, at the same time, with no locks. This page follows one box through the app to show how every copy ends up the same, using the real data shapes and messages.</p>
+<ul class="toc">
+  <li><a href="#copies">Copies</a></li>
+  <li><a href="#register">The register</a></li>
+  <li><a href="#rule">The rule</a></li>
+  <li><a href="#wire">Messages</a></li>
+  <li><a href="#concurrent">Two edits at once</a></li>
+  <li><a href="#count">Edits, not clocks</a></li>
+  <li><a href="#delete">Deleting</a></li>
+  <li><a href="#synced">What a tab sends</a></li>
+  <li><a href="#reconnect">Reconnecting</a></li>
+  <li><a href="#saving">Saving</a></li>
+  <li><a href="#recap">Recap</a></li>
+</ul>
+
+<section id="copies">
+<h2>1. Every editor has its own copy</h2>
+<p>In a shared room, each open tab holds the whole drawing, and so does the collab server. When you draw, your copy changes immediately, before anyone else hears about it. The edit is then sent to the server, which passes it on.</p>
+<p>That raises the question this page answers: when two copies disagree, which one is right? The app needs an answer that every copy works out on its own, without asking anyone, and that comes out the same everywhere. That makes the drawing a <b>CRDT</b> (conflict-free replicated data type): copies that have seen the same edits are identical, whatever order the edits arrived in.</p>
+</section>
+
+<section id="register">
+<h2>2. One register per element</h2>
+<p>The drawing is a map from element id to element. Each entry is a <b>register</b>: it holds one value, the latest version of that element. Two fields order the versions, and everything else is the value. This is a real rectangle, as the server held it during a test run:</p>
+<div class="chips" role="group" aria-label="Highlight part of the register">
+  <button class="ck" data-f="k" aria-pressed="false">Key</button>
+  <button class="co" data-f="o" aria-pressed="false">Ordering</button>
+  <button class="cv" data-f="v" aria-pressed="false">Value</button>
+</div>
+<pre class="json" id="regjson"><code>{
+  <span class="k">"id": "d-EEBx8LMpfKDrw2NVn1k",</span>
+  <span class="o">"version": 3,</span>
+  <span class="o">"versionNonce": 2062564278,</span>
+  <span class="v">"isDeleted": false,</span>
+  <span class="v">"type": "rectangle",</span>
+  <span class="v">"x": 384, "y": 320, "width": 115, "height": 70.5, "angle": 0,</span>
+  <span class="v">"strokeColor": "#1e1e1e", "backgroundColor": "transparent",</span>
+  <span class="v">"fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid",</span>
+  <span class="v">"roughness": 1, "opacity": 100, "roundness": { "type": 3 },</span>
+  <span class="v">"index": "a0",</span>
+  <span class="v">"groupIds": [], "frameId": null, "boundElements": null,</span>
+  <span class="v">"seed": 1393476906, "updated": 1795375595057,</span>
+  <span class="v">"link": null, "locked": false</span>
+}</code></pre>
+<p><b>Key:</b> <code>id</code> picks the register. <b>Ordering:</b> <code>version</code> counts the edits made to this element; <code>versionNonce</code> is a random number drawn at every edit. <b>Value:</b> everything else, and it travels as one piece. Two fields in the value look like they might matter, but neither decides a merge: <code>index</code> sets the stacking order between elements, and <code>updated</code> is a wall-clock timestamp.</p>
+<p>The same map lives in three places, in three forms:</p>
+<div class="cards">
+  <div class="card"><h3>In each tab</h3><p>The Excalidraw scene: an array of elements, deleted ones included.</p></div>
+  <div class="card"><h3>On the server</h3><p><code>Room.elements</code>: a <code>Map&lt;string, SyncedElement&gt;</code> per open room.</p></div>
+  <div class="card"><h3>In Postgres</h3><p>One <code>room_elements</code> row per register: version, nonce, and the element as JSON.</p></div>
+</div>
+<p>The server only reads the ordering fields. It passes the rest through untouched (<a href="https://github.com/eklavyamirani/design-canvas/blob/main/shared/protocol.ts">shared/protocol.ts</a>):</p>
+<pre><code>type SyncedElement = {
+  id: string;
+  version: number;
+  versionNonce: number;
+  [key: string]: unknown;   // the value: whatever Excalidraw put there
+};</code></pre>
+</section>
+
+<section id="rule">
+<h2>3. The rule: one function decides</h2>
+<p>When a copy of an element arrives, the receiver compares it with the copy it already has. The server, every tab and the Postgres save all use this same comparison:</p>
+<pre><code>function wins(incoming, current) {
+  if (!current) return true;                       // new element
+  if (incoming.version !== current.version)
+    return incoming.version &gt; current.version;     // more edits wins
+  return incoming.versionNonce &lt; current.versionNonce; // tie: lower nonce wins
+}</code></pre>
+<p>Try it. Set the copy a tab already has and the copy that arrives:</p>
+<div class="play">
+  <fieldset><legend>Copy it has</legend>
+    <label>version <input id="hv" type="number" min="1" step="1" value="2" inputmode="numeric"></label>
+    <label>nonce <input id="hn" type="number" min="0" step="1" value="900" inputmode="numeric"></label>
+  </fieldset>
+  <fieldset><legend>Copy arriving</legend>
+    <label>version <input id="av" type="number" min="1" step="1" value="2" inputmode="numeric"></label>
+    <label>nonce <input id="an" type="number" min="0" step="1" value="300" inputmode="numeric"></label>
+  </fieldset>
+</div>
+<div class="verdict" id="verdict" aria-live="polite"></div>
+<p style="margin-top:12px">The rule only looks at the data, never at who sent it or when it arrived. So two copies that see the same pair of versions always keep the same one. That's what makes arrival order irrelevant.</p>
+</section>
+
+<section id="wire">
+<h2>4. Messages on the wire</h2>
+<p>Tabs and the server talk over one WebSocket per tab, one JSON message per frame. An edit travels as an <code>update</code> carrying whole elements. Step through it:</p>
+<div data-story="wire"></div>
+</section>
+
+<section id="concurrent">
+<h2>5. Two people, one box, same moment</h2>
+<p>Alice drags the box while Bob recolours it. Both start from version 1, so both produce a version 2. Pick which edit reaches the server first. The ending is the same either way.</p>
+<div data-story="concurrent"></div>
+<p class="callout">Bob's colour survives and Alice's move is lost entirely. A register holds a whole element, so the merge picks one complete copy and never combines fields from two. Field-level CRDTs such as Yjs would keep both changes, at the cost of more bookkeeping.</p>
+</section>
+
+<section id="count">
+<h2>6. More edits beat later edits</h2>
+<p><code>version</code> is an edit counter, not a clock. Here Bob edits while offline, five minutes after Alice, but she made more edits.</p>
+<div data-story="count"></div>
+</section>
+
+<section id="delete">
+<h2>7. Deleting keeps a marker</h2>
+<p>A delete is an edit like any other: it sets <code>isDeleted: true</code> and bumps the version. The register stays in every copy and in Postgres. If it were removed, an older edit arriving late would look new and bring the box back.</p>
+<div data-story="delete"></div>
+</section>
+
+<section id="synced">
+<h2>8. What a tab sends: the synced record</h2>
+<p>A tab makes two different comparisons. When a copy <b>arrives</b>, it compares it with its own to decide what to show. When the user <b>edits</b>, it must decide what to send, but nothing has arrived to compare against. So each tab keeps a second map, the <b>synced record</b>: the newest version of each element the server is known to have. It sends an element only when the scene's copy wins against the record.</p>
+<p>The record must hold <b>copies</b>. Excalidraw applies some edits in place: a drag bumps <code>version</code> and moves <code>x</code> on the same object. An earlier version of the editor stored the scene's own objects, so a drag changed the record too, and the drag was never sent. These are real values from reproducing that bug. The fix is in <a href="https://github.com/eklavyamirani/design-canvas/pull/4">pull request #4</a>.</p>
+<div data-story="synced"></div>
+</section>
+
+<section id="reconnect">
+<h2>9. Reconnecting</h2>
+<p>A tab that loses its connection keeps drawing. When it reconnects, the server sends an <code>init</code> message with its whole scene. The tab clears its synced record and refills it from that message, so the record says exactly what the server has. Then every local edit that beats it gets sent.</p>
+<div data-story="reconnect"></div>
+</section>
+
+<section id="saving">
+<h2>10. Saving: the same rule in SQL</h2>
+<p>While anyone is connected, the server keeps the room in memory and relays edits immediately. Edits that won are collected and written to Postgres 500 ms later, in one statement per batch. A register is one row:</p>
+<pre><code>create table room_elements (
+  room_id text not null references rooms (id) on delete cascade,
+  id text not null,
+  version bigint not null,
+  version_nonce bigint not null,
+  data jsonb not null,          -- the whole element
+  primary key (room_id, id)
+);</code></pre>
+<p>The save is an upsert whose <code>where</code> clause is <code>wins()</code> written in SQL. A slow save can therefore never overwrite a newer row saved in between:</p>
+<pre><code>insert into room_elements (room_id, id, version, version_nonce, data) ...
+on conflict (room_id, id) do update
+  set version = excluded.version, version_nonce = excluded.version_nonce, data = excluded.data
+  where excluded.version &gt; room_elements.version
+     or (excluded.version = room_elements.version
+         and excluded.version_nonce &lt; room_elements.version_nonce)</code></pre>
+<p>Cursors take a different path: they're relayed to the others and never stored. Images are stored per room under an id that is a hash of their content, and sent only to a tab that lacks one.</p>
+</section>
+
+<section id="recap">
+<h2>Recap</h2>
+<ul class="recap">
+  <li>The drawing is a map of <b>registers</b>, one per element id. Each register holds one whole element.</li>
+  <li><b>One rule</b>, <code>wins()</code>, picks between two copies: the higher <code>version</code>, then the lower random <code>versionNonce</code>. It depends only on the data, so every copy picks the same winner in any order.</li>
+  <li>Every copy runs the rule: the server, each tab, and the Postgres save. The server is just one more copy.</li>
+  <li><code>version</code> counts edits; it isn't a clock. Deletes are markers that stay.</li>
+  <li>Each tab keeps a <b>synced record</b> of what the server has, made of copies, and sends only what beats it. A reconnect rebuilds the record from the server's real state.</li>
+  <li>The cost: when two people change the same element at once, one whole edit is dropped, and nobody is told.</li>
+</ul>
+</section>
+
+<footer>
+<p>Source: <a href="https://github.com/eklavyamirani/design-canvas/blob/main/shared/protocol.ts">shared/protocol.ts</a> (messages and the rule), <a href="https://github.com/eklavyamirani/design-canvas/blob/main/src/collab/Collab.ts">src/collab/Collab.ts</a> (the editor), <a href="https://github.com/eklavyamirani/design-canvas/blob/main/server/src/rooms.ts">server/src/rooms.ts</a> (rooms), <a href="https://github.com/eklavyamirani/design-canvas/blob/main/server/src/store.ts">server/src/store.ts</a> (Postgres).</p>
+<p><a href="../">Open the canvas</a></p>
+</footer>
+</main>
+
+<script>
+(function () {
+  var RED = '#e03131', GREEN = '#2f9e44', BLACK = 'ink';
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function R(v, n, x, c, extra) {
+    var r = { v: v, n: n, x: x, c: c };
+    if (extra) for (var k in extra) r[k] = extra[k];
+    return r;
+  }
+  function cssColor(c) { return c === BLACK ? 'var(--ink)' : c; }
+  function hex(c) { return c === BLACK ? '#1e1e1e' : c; }
+  function esc(s) { return String(s).replace(/[&<>]/g, function (m) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]; }); }
+
+  function element(r) {
+    return { id: 'box', version: r.v, versionNonce: r.n, isDeleted: !!r.del, x: r.x, strokeColor: hex(r.c) };
+  }
+  function message(p) {
+    var body;
+    if (p.kind === 'init') {
+      body = { type: 'init', you: { id: '5f0c2a9e71d3b846', name: p.name || 'you' }, peers: [{ id: '93ab4e10c7f25d68', name: 'alice' }], elements: [element(p.e)], fileIds: [] };
+    } else {
+      body = { type: 'update', elements: [element(p.e)] };
+    }
+    return JSON.stringify(body, null, 2).replace(/("strokeColor": "[^"]*")/, '$1,\n      "…": "other element fields"');
+  }
+
+  // ---- the stories -------------------------------------------------------
+  var STORIES = {};
+
+  STORIES.wire = {
+    cols: [['A', 'Tab A'], ['S', 'Server'], ['B', 'Tab B']],
+    variants: { '': [
+      { say: 'Tab A, the server and Tab B each hold the box at <code>version 1</code>.',
+        r: { A: R(1, 500, 100, BLACK), S: R(1, 500, 100, BLACK), B: R(1, 500, 100, BLACK) } },
+      { say: 'Tab A drags the box. Its copy becomes <code>version 2</code> with a fresh random nonce, and the box moves on screen at once. Edits go out in batches every 50 ms.',
+        hi: ['A'], r: { A: R(2, 812, 260, BLACK), S: R(1, 500, 100, BLACK), B: R(1, 500, 100, BLACK) } },
+      { say: 'The update reaches the server. v2 beats v1, so the server replaces its copy.',
+        pkt: { f: 'A', t: 'S', kind: 'update', e: R(2, 812, 260, BLACK) },
+        hi: ['S'], r: { A: R(2, 812, 260, BLACK), S: R(2, 812, 260, BLACK, { tag: 'took it', tc: 'ok' }), B: R(1, 500, 100, BLACK) } },
+      { say: 'The server relays it to every <em>other</em> tab. Tab B runs the same rule and takes it. Nothing goes back to Tab A, which already has it.',
+        pkt: { f: 'S', t: 'B', kind: 'update', e: R(2, 812, 260, BLACK) },
+        hi: ['B'], r: { A: R(2, 812, 260, BLACK), S: R(2, 812, 260, BLACK), B: R(2, 812, 260, BLACK, { tag: 'took it', tc: 'ok' }) } },
+      { say: 'If the same v2 arrives again (a retry), it doesn\'t beat itself. Nothing changes, and nothing is relayed. Repeats are harmless.',
+        pkt: { f: 'A', t: 'S', kind: 'update', e: R(2, 812, 260, BLACK), lose: true },
+        hi: ['S'], r: { A: R(2, 812, 260, BLACK), S: R(2, 812, 260, BLACK, { tag: 'ignored', tc: 'info' }), B: R(2, 812, 260, BLACK) } }
+    ] }
+  };
+
+  var c0 = { say: 'Alice, the server and Bob all hold the box at <code>v1</code>, nonce 500.',
+    r: { A: R(1, 500, 100, BLACK), S: R(1, 500, 100, BLACK), B: R(1, 500, 100, BLACK) } };
+  var c1 = { say: 'At the same moment, Alice drags the box right and Bob turns it red. Each bumps their own copy to <code>v2</code> with a new random nonce: 900 for Alice, 300 for Bob.',
+    hi: ['A', 'B'], r: { A: R(2, 900, 400, BLACK), S: R(1, 500, 100, BLACK), B: R(2, 300, 100, RED) } };
+  STORIES.concurrent = {
+    cols: [['A', 'Alice'], ['S', 'Server'], ['B', 'Bob']],
+    variants: {
+      "Alice's arrives first": [c0, c1,
+        { say: 'Alice\'s v2 (nonce 900) reaches the server and beats v1.',
+          pkt: { f: 'A', t: 'S', kind: 'update', e: R(2, 900, 400, BLACK) },
+          hi: ['S'], r: { A: R(2, 900, 400, BLACK), S: R(2, 900, 400, BLACK, { tag: 'took it', tc: 'ok' }), B: R(2, 300, 100, RED) } },
+        { say: 'The server relays it to Bob. Same version as his, and 300 &lt; 900, so <b>Bob keeps his own</b>.',
+          pkt: { f: 'S', t: 'B', kind: 'update', e: R(2, 900, 400, BLACK), lose: true },
+          hi: ['B'], r: { A: R(2, 900, 400, BLACK), S: R(2, 900, 400, BLACK), B: R(2, 300, 100, RED, { tag: 'kept its own', tc: 'info' }) } },
+        { say: 'Bob\'s v2 (nonce 300) reaches the server and wins the tie on the lower nonce.',
+          pkt: { f: 'B', t: 'S', kind: 'update', e: R(2, 300, 100, RED) },
+          hi: ['S'], r: { A: R(2, 900, 400, BLACK), S: R(2, 300, 100, RED, { tag: 'took it', tc: 'ok' }), B: R(2, 300, 100, RED) } },
+        { say: 'The server relays it to Alice, who takes it too. Everyone holds v2, nonce 300: red, at x 100. Alice\'s drag is gone.',
+          pkt: { f: 'S', t: 'A', kind: 'update', e: R(2, 300, 100, RED) },
+          hi: ['A'], r: { A: R(2, 300, 100, RED, { tag: 'drag lost', tc: 'bad' }), S: R(2, 300, 100, RED), B: R(2, 300, 100, RED) } }
+      ],
+      "Bob's arrives first": [c0, c1,
+        { say: 'Bob\'s v2 (nonce 300) reaches the server first and beats v1.',
+          pkt: { f: 'B', t: 'S', kind: 'update', e: R(2, 300, 100, RED) },
+          hi: ['S'], r: { A: R(2, 900, 400, BLACK), S: R(2, 300, 100, RED, { tag: 'took it', tc: 'ok' }), B: R(2, 300, 100, RED) } },
+        { say: 'The server relays it to Alice. Same version as hers, and 300 &lt; 900, so <b>Alice takes Bob\'s</b>. Her drag is gone.',
+          pkt: { f: 'S', t: 'A', kind: 'update', e: R(2, 300, 100, RED) },
+          hi: ['A'], r: { A: R(2, 300, 100, RED, { tag: 'drag lost', tc: 'bad' }), S: R(2, 300, 100, RED), B: R(2, 300, 100, RED) } },
+        { say: 'Alice\'s drag was already on its way. At the server it loses (900 &gt; 300), so it\'s dropped and never relayed. Everyone holds the same red box as in the other order.',
+          pkt: { f: 'A', t: 'S', kind: 'update', e: R(2, 900, 400, BLACK), lose: true },
+          hi: ['S'], r: { A: R(2, 300, 100, RED), S: R(2, 300, 100, RED, { tag: 'ignored', tc: 'info' }), B: R(2, 300, 100, RED) } }
+      ]
+    }
+  };
+
+  STORIES.count = {
+    cols: [['A', 'Alice'], ['S', 'Server'], ['B', 'Bob']],
+    variants: { '': [
+      { say: 'Everyone holds <code>v1</code>. Bob goes offline.', tt: { B: 'Bob (offline)' },
+        r: { A: R(1, 500, 100, BLACK), S: R(1, 500, 100, BLACK), B: R(1, 500, 100, BLACK) } },
+      { say: 'At 10:00 Alice nudges the box three times. Each nudge is an edit, so her copy goes to <code>v4</code>, and the server takes it.', tt: { B: 'Bob (offline)' },
+        pkt: { f: 'A', t: 'S', kind: 'update', e: R(4, 704, 130, BLACK) },
+        hi: ['A', 'S'], r: { A: R(4, 704, 130, BLACK), S: R(4, 704, 130, BLACK), B: R(1, 500, 100, BLACK) } },
+      { say: 'At 10:05, still offline, Bob turns his copy green. His v1 becomes <code>v2</code>. It\'s the later edit on the clock, but only his second.', tt: { B: 'Bob (offline)' },
+        hi: ['B'], r: { A: R(4, 704, 130, BLACK), S: R(4, 704, 130, BLACK), B: R(2, 1, 100, GREEN) } },
+      { say: 'Bob reconnects and the server sends <code>init</code> with v4. v4 beats v2, so Bob\'s green is replaced, and it\'s never sent because it can\'t beat what the server has.',
+        pkt: { f: 'S', t: 'B', kind: 'init', name: 'bob', e: R(4, 704, 130, BLACK) },
+        hi: ['B'], r: { A: R(4, 704, 130, BLACK), S: R(4, 704, 130, BLACK), B: R(4, 704, 130, BLACK, { tag: 'green lost', tc: 'bad' }) } }
+    ] }
+  };
+
+  STORIES.delete = {
+    cols: [['A', 'Alice'], ['S', 'Server'], ['B', 'Bob']],
+    variants: { '': [
+      { say: 'Everyone holds the box at <code>v4</code>.',
+        r: { A: R(4, 704, 130, BLACK), S: R(4, 704, 130, BLACK), B: R(4, 704, 130, BLACK) } },
+      { say: 'Bob deletes it: <code>v5</code>, nonce 50, <code>isDeleted: true</code>. Alice hasn\'t seen that yet and drags it: also <code>v5</code>, nonce 999.',
+        hi: ['A', 'B'], r: { A: R(5, 999, 600, BLACK), S: R(4, 704, 130, BLACK), B: R(5, 50, 130, BLACK, { del: true }) } },
+      { say: 'Bob\'s delete reaches the server first and beats v4. The deleted register replaces the old one; the row is not removed.',
+        pkt: { f: 'B', t: 'S', kind: 'update', e: R(5, 50, 130, BLACK, { del: true }) },
+        hi: ['S'], r: { A: R(5, 999, 600, BLACK), S: R(5, 50, 130, BLACK, { del: true, tag: 'took it', tc: 'ok' }), B: R(5, 50, 130, BLACK, { del: true }) } },
+      { say: 'The server relays it to Alice. Same version, and 50 &lt; 999, so the delete beats her drag.',
+        pkt: { f: 'S', t: 'A', kind: 'update', e: R(5, 50, 130, BLACK, { del: true }) },
+        hi: ['A'], r: { A: R(5, 50, 130, BLACK, { del: true, tag: 'drag lost', tc: 'bad' }), S: R(5, 50, 130, BLACK, { del: true }), B: R(5, 50, 130, BLACK, { del: true }) } },
+      { say: 'Alice\'s drag reaches the server and loses to the marker, so it\'s dropped. Without the marker, the server would have had nothing to compare it with, and the box would have come back.',
+        pkt: { f: 'A', t: 'S', kind: 'update', e: R(5, 999, 600, BLACK), lose: true },
+        hi: ['S'], r: { A: R(5, 50, 130, BLACK, { del: true }), S: R(5, 50, 130, BLACK, { del: true, tag: 'ignored', tc: 'info' }), B: R(5, 50, 130, BLACK, { del: true }) } },
+      { say: 'Someone opening the room later gets the deleted register in <code>init</code>, so they can reject old edits too.',
+        tt: { B: 'Dave (joins)' },
+        pkt: { f: 'S', t: 'B', kind: 'init', name: 'dave', e: R(5, 50, 130, BLACK, { del: true }) },
+        hi: ['B'], r: { A: R(5, 50, 130, BLACK, { del: true }), S: R(5, 50, 130, BLACK, { del: true }), B: R(5, 50, 130, BLACK, { del: true }) } }
+    ] }
+  };
+
+  var N5 = 1571364202, N7 = 1095872694;
+  STORIES.synced = {
+    cols: [['A', 'Tab A'], ['S', 'Server'], ['B', 'Tab B']],
+    syncedCol: 'A',
+    variants: {
+      'Old: keeps the live object': [
+        { say: 'After a recolour, every copy holds <code>v5</code>. Tab A\'s synced record says the server has v5. But it\'s the scene\'s own object, not a copy.',
+          r: { A: R(5, N5, 384, RED), As: R(5, N5, 384, RED, { alias: true }), S: R(5, N5, 384, RED), B: R(5, N5, 384, RED) } },
+        { say: 'Tab A drags the box. Excalidraw changes the same object in place: <code>v7</code>, x 538. The synced record <em>is</em> that object, so it now says v7 too.',
+          hi: ['A'], r: { A: R(7, N7, 538, RED), As: R(7, N7, 538, RED, { alias: true }), S: R(5, N5, 384, RED), B: R(5, N5, 384, RED) } },
+        { say: 'Time to send: does the scene\'s v7 beat the record\'s v7? No, it\'s comparing the object with itself. Nothing is sent. The server and Tab B stay at v5, and nothing will tell them until another edit or a reconnect.',
+          hi: ['S', 'B'], r: { A: R(7, N7, 538, RED), As: R(7, N7, 538, RED, { alias: true }), S: R(5, N5, 384, RED, { tag: 'never told', tc: 'bad' }), B: R(5, N5, 384, RED, { tag: 'never told', tc: 'bad' }) } }
+      ],
+      'Fixed: keeps a copy': [
+        { say: 'After a recolour, every copy holds <code>v5</code>. Tab A\'s synced record holds its own copy of v5.',
+          r: { A: R(5, N5, 384, RED), As: R(5, N5, 384, RED, { copy: true }), S: R(5, N5, 384, RED), B: R(5, N5, 384, RED) } },
+        { say: 'Tab A drags the box. Excalidraw changes the scene\'s object to <code>v7</code>, x 538. The copy in the record still says v5.',
+          hi: ['A'], r: { A: R(7, N7, 538, RED), As: R(5, N5, 384, RED, { copy: true }), S: R(5, N5, 384, RED), B: R(5, N5, 384, RED) } },
+        { say: 'Time to send: v7 beats the record\'s v5, so it goes out, and the record stores a copy of what was sent. The server takes it.',
+          pkt: { f: 'A', t: 'S', kind: 'update', e: R(7, N7, 538, RED) },
+          hi: ['A', 'S'], r: { A: R(7, N7, 538, RED), As: R(7, N7, 538, RED, { copy: true }), S: R(7, N7, 538, RED, { tag: 'took it', tc: 'ok' }), B: R(5, N5, 384, RED) } },
+        { say: 'The server relays it, and Tab B moves the box. Every copy holds v7.',
+          pkt: { f: 'S', t: 'B', kind: 'update', e: R(7, N7, 538, RED) },
+          hi: ['B'], r: { A: R(7, N7, 538, RED), As: R(7, N7, 538, RED, { copy: true }), S: R(7, N7, 538, RED), B: R(7, N7, 538, RED, { tag: 'took it', tc: 'ok' }) } }
+      ]
+    }
+  };
+
+  STORIES.reconnect = {
+    cols: [['A', 'Tab A'], ['S', 'Server'], ['B', 'Tab B']],
+    syncedCol: 'A',
+    variants: { '': [
+      { say: 'Everyone holds <code>v8</code>. Tab A\'s synced record agrees.',
+        r: { A: R(8, 163715178, 538, GREEN), As: R(8, 163715178, 538, GREEN, { copy: true }), S: R(8, 163715178, 538, GREEN), B: R(8, 163715178, 538, GREEN) } },
+      { say: 'Tab A loses its connection and keeps drawing: two more edits take its copy to <code>v10</code>. Nothing can be sent.', tt: { A: 'Tab A (offline)' },
+        hi: ['A'], r: { A: R(10, 734120998, 410, GREEN), As: R(8, 163715178, 538, GREEN, { copy: true }), S: R(8, 163715178, 538, GREEN), B: R(8, 163715178, 538, GREEN) } },
+      { say: 'It reconnects. The server sends <code>init</code>. Tab A clears its synced record and refills it from the message: the server has v8. Its scene keeps v10, because v10 beats v8.',
+        pkt: { f: 'S', t: 'A', kind: 'init', name: 'tab-a', e: R(8, 163715178, 538, GREEN) },
+        hi: ['A'], r: { A: R(10, 734120998, 410, GREEN, { tag: 'kept its own', tc: 'info' }), As: R(8, 163715178, 538, GREEN, { copy: true, tag: 'refilled', tc: 'ok' }), S: R(8, 163715178, 538, GREEN), B: R(8, 163715178, 538, GREEN) } },
+      { say: 'Then it sends whatever beats the record: v10 goes to the server…',
+        pkt: { f: 'A', t: 'S', kind: 'update', e: R(10, 734120998, 410, GREEN) },
+        hi: ['S'], r: { A: R(10, 734120998, 410, GREEN), As: R(10, 734120998, 410, GREEN, { copy: true }), S: R(10, 734120998, 410, GREEN, { tag: 'took it', tc: 'ok' }), B: R(8, 163715178, 538, GREEN) } },
+      { say: '…and on to Tab B. The offline edits made it. This is also why, before the fix in section 8, a reconnect rescued a stuck drag: the rebuilt record told the truth again.',
+        pkt: { f: 'S', t: 'B', kind: 'update', e: R(10, 734120998, 410, GREEN) },
+        hi: ['B'], r: { A: R(10, 734120998, 410, GREEN), As: R(10, 734120998, 410, GREEN, { copy: true }), S: R(10, 734120998, 410, GREEN), B: R(10, 734120998, 410, GREEN, { tag: 'took it', tc: 'ok' }) } }
+    ] }
+  };
+
+  // ---- the player --------------------------------------------------------
+  function lanePos(x) {
+    var p = (x - 100) / 500;
+    if (p < 0) p = 0; if (p > 1) p = 1;
+    return (4 + p * 62).toFixed(1) + '%';
+  }
+
+  function Story(root, def) {
+    var names = Object.keys(def.variants);
+    var variant = names[0], i = 0, busy = false, timer = null;
+    var html = '';
+    if (names.length > 1 || names[0] !== '') {
+      html += '<div class="seg" role="group" aria-label="Choose a version">' +
+        names.map(function (n) { return '<button type="button" data-v="' + esc(n) + '">' + esc(n) + '</button>'; }).join('') + '</div>';
+    }
+    html += '<div class="stage">' + def.cols.map(function (c) {
+      var syncedRow = def.syncedCol === c[0]
+        ? '<div class="synced"><div class="lbl">synced record</div><div class="meta" data-s="meta"></div><div data-s="tag"></div></div>' : '';
+      return '<div class="col" data-c="' + c[0] + '"><h4 data-p="title"></h4><div class="lane"><div class="shape" data-p="shape"></div></div>' +
+        '<div class="meta" data-p="meta"></div><div class="sub" data-p="sub"></div><div data-p="tag"></div>' + syncedRow + '</div>';
+    }).join('') + '</div>';
+    html += '<p class="say" aria-live="polite"></p>' +
+      '<div class="ctl"><button type="button" data-a="back" aria-label="Previous step">&larr; Back</button>' +
+      '<button type="button" data-a="next">Next &rarr;</button>' +
+      '<button type="button" data-a="play">Play</button><span class="count"></span></div>' +
+      '<div class="payload"><p class="lbl"></p><pre><code></code></pre></div>';
+    root.innerHTML = html;
+
+    var stage = root.querySelector('.stage');
+    var cols = {};
+    def.cols.forEach(function (c) { cols[c[0]] = stage.querySelector('[data-c="' + c[0] + '"]'); });
+    var say = root.querySelector('.say'), count = root.querySelector('.count');
+    var plbl = root.querySelector('.payload .lbl'), pcode = root.querySelector('.payload code');
+    var playBtn = root.querySelector('[data-a=play]');
+
+    function steps() { return def.variants[variant]; }
+
+    function tagHTML(r) {
+      return r && r.tag ? '<span class="tag ' + (r.tc || 'info') + '">' + r.tag + '</span>' : '';
+    }
+
+    function render(st) {
+      def.cols.forEach(function (c) {
+        var k = c[0], col = cols[k], r = st.r[k];
+        col.querySelector('[data-p=title]').textContent = (st.tt && st.tt[k]) || c[1];
+        col.classList.toggle('hi', !!(st.hi && st.hi.indexOf(k) >= 0));
+        var shape = col.querySelector('[data-p=shape]');
+        shape.style.left = lanePos(r.x);
+        shape.style.borderColor = cssColor(r.c);
+        shape.classList.toggle('del', !!r.del);
+        col.querySelector('[data-p=meta]').innerHTML = '<span class="v">v' + r.v + '</span> · n' + r.n;
+        col.querySelector('[data-p=sub]').innerHTML = 'x ' + r.x + (r.del ? ' · deleted' : '');
+        col.querySelector('[data-p=tag]').innerHTML = tagHTML(r);
+        if (def.syncedCol === k) {
+          var s = st.r[k + 's'];
+          col.querySelector('[data-s=meta]').innerHTML = '<span class="v">v' + s.v + '</span> · x ' + s.x;
+          col.querySelector('[data-s=tag]').innerHTML =
+            (s.alias ? '<span class="tag bad">same object as scene</span>' : '<span class="tag ok">a copy</span>') +
+            (s.tag ? ' ' + tagHTML(s) : '');
+        }
+      });
+      say.innerHTML = st.say;
+      count.textContent = 'Step ' + (i + 1) + ' of ' + steps().length;
+      if (st.pkt) {
+        var p = st.pkt, from = (st.tt && st.tt[p.f]) || colName(p.f), to = (st.tt && st.tt[p.t]) || colName(p.t);
+        plbl.textContent = 'Message in this step: ' + from + ' → ' + to + (p.lose ? ' (it loses on arrival)' : '');
+        pcode.textContent = message(p);
+        pcode.parentElement.hidden = false;
+      } else {
+        plbl.textContent = 'No message in this step. Payloads appear here when one is sent.';
+        pcode.textContent = '';
+        pcode.parentElement.hidden = true;
+      }
+      root.querySelectorAll('.seg button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.v === variant)); });
+    }
+
+    function colName(k) { for (var j = 0; j < def.cols.length; j++) if (def.cols[j][0] === k) return def.cols[j][1]; return k; }
+
+    function fly(p) {
+      return new Promise(function (done) {
+        if (reduced) return done();
+        var sr = stage.getBoundingClientRect(), a = cols[p.f].getBoundingClientRect(), b = cols[p.t].getBoundingClientRect();
+        var el = document.createElement('div');
+        el.className = 'pkt' + (p.lose ? ' lose' : '');
+        el.textContent = p.kind + ' v' + p.e.v;
+        stage.appendChild(el);
+        var w = el.offsetWidth;
+        var x0 = a.left - sr.left + a.width / 2 - w / 2, x1 = b.left - sr.left + b.width / 2 - w / 2;
+        el.style.left = x0 + 'px';
+        el.style.top = (a.top - sr.top + 28) + 'px';
+        requestAnimationFrame(function () { requestAnimationFrame(function () { el.style.transform = 'translateX(' + (x1 - x0) + 'px)'; }); });
+        setTimeout(function () { el.classList.add('gone'); setTimeout(function () { el.remove(); done(); }, 250); }, 850);
+      });
+    }
+
+    function go(n, animate) {
+      if (busy || n < 0 || n >= steps().length) return;
+      var st = steps()[n];
+      if (animate && st.pkt) {
+        busy = true;
+        plbl.textContent = 'Message in flight: ' + colName(st.pkt.f) + ' → ' + colName(st.pkt.t);
+        pcode.textContent = message(st.pkt);
+        pcode.parentElement.hidden = false;
+        fly(st.pkt).then(function () { busy = false; i = n; render(st); });
+      } else {
+        i = n; render(st);
+      }
+    }
+
+    function stop() { if (timer) { clearInterval(timer); timer = null; playBtn.textContent = 'Play'; } }
+
+    root.addEventListener('click', function (ev) {
+      var b = ev.target.closest('button');
+      if (!b || !root.contains(b)) return;
+      if (b.dataset.v !== undefined) { stop(); variant = b.dataset.v; i = 0; render(steps()[0]); return; }
+      if (b.dataset.a === 'next') { stop(); go(i + 1, true); }
+      if (b.dataset.a === 'back') { stop(); go(i - 1, false); }
+      if (b.dataset.a === 'play') {
+        if (timer) return stop();
+        if (i >= steps().length - 1) { i = 0; render(steps()[0]); }
+        playBtn.textContent = 'Pause';
+        timer = setInterval(function () {
+          if (busy) return;
+          if (i >= steps().length - 1) return stop();
+          go(i + 1, true);
+        }, 2600);
+      }
+    });
+
+    render(steps()[0]);
+  }
+
+  document.querySelectorAll('[data-story]').forEach(function (el) { Story(el, STORIES[el.dataset.story]); });
+
+  // ---- register highlighting ---------------------------------------------
+  var json = document.getElementById('regjson');
+  document.querySelectorAll('.chips button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var on = b.getAttribute('aria-pressed') !== 'true';
+      document.querySelectorAll('.chips button').forEach(function (o) { o.setAttribute('aria-pressed', 'false'); });
+      json.className = 'json';
+      if (on) { b.setAttribute('aria-pressed', 'true'); json.classList.add('focus-' + b.dataset.f); }
+    });
+  });
+
+  // ---- the rule playground -----------------------------------------------
+  function wins(inc, cur) {
+    if (inc.v !== cur.v) return inc.v > cur.v;
+    return inc.n < cur.n;
+  }
+  var ids = ['hv', 'hn', 'av', 'an'], verdict = document.getElementById('verdict');
+  function judge() {
+    var vals = ids.map(function (id) { return Number(document.getElementById(id).value); });
+    if (vals.some(function (n) { return !Number.isSafeInteger(n) || n < 0; })) {
+      verdict.textContent = 'Enter whole numbers of 0 or more.';
+      return;
+    }
+    var has = { v: vals[0], n: vals[1] }, inc = { v: vals[2], n: vals[3] };
+    var a = wins(inc, has), b = wins(has, inc), why;
+    if (inc.v !== has.v) why = 'it has the higher version (' + Math.max(inc.v, has.v) + ' &gt; ' + Math.min(inc.v, has.v) + ').';
+    else why = 'the versions tie at ' + inc.v + ', and its nonce is lower.';
+    var swap = '<br><span style="color:var(--muted)">Swap the two and the same copy still wins, so the tab and the sender end up holding the same one.</span>';
+    if (a) verdict.innerHTML = '<b>The arriving copy wins:</b> ' + why + ' The tab replaces its copy.' + swap;
+    else if (b) verdict.innerHTML = '<b>The tab keeps its copy:</b> ' + why + swap;
+    else verdict.innerHTML = '<b>Neither wins:</b> same version and same nonce. Each side keeps whatever it has, and if the two copies differ, they stay different. With a random 31-bit nonce, that is about a one in two billion event.';
+  }
+  ids.forEach(function (id) { document.getElementById(id).addEventListener('input', judge); });
+  judge();
+})();
+</script>
+</body>
+</html>
